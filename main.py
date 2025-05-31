@@ -43,9 +43,9 @@ def test_installation():
 def main():
     parser = argparse.ArgumentParser(description='Traffic Detection System')
     parser.add_argument('--mode', type=str, 
-                       choices=['video', 'image', 'realtime', 'setup', 'test', 'test-camera'],
+                       choices=['video', 'image', 'realtime', 'setup', 'test', 'test-camera', 'batch', 'interactive'],
                        default='video', help='Detection mode')
-    parser.add_argument('--input', type=str, help='Input video/image path')
+    parser.add_argument('--input', type=str, help='Input video/image/folder path')
     parser.add_argument('--output', type=str, help='Output path')
     parser.add_argument('--model', type=str, help='Custom YOLO model path')
     parser.add_argument('--sign-model', type=str, help='Vietnamese sign CNN model path')
@@ -107,29 +107,76 @@ def main():
             if not os.path.exists(args.input):
                 print(f"Input image file not found: {args.input}")
                 return
+                
+            print(f"🖼️ Processing image: {args.input}")
+            annotated_image, detections = detector.detect_from_image_file(args.input, args.output)
             
-            import cv2
-            image = cv2.imread(args.input)
-            if image is None:
-                print(f"Could not load image: {args.input}")
+            if annotated_image is not None:
+                # Display results interactively
+                detector.display_image_with_detections(annotated_image, detections)
+                print("✅ Image processing completed!")
+            else:
+                print("❌ Failed to process image")
+                
+        elif args.mode == 'batch':
+            if not args.input:
+                print("Please provide input folder path with --input")
+                return
+            
+            if not os.path.exists(args.input):
+                print(f"Input folder not found: {args.input}")
                 return
                 
-            print(f"Processing image: {args.input}")
-            annotated_image, detections = detector.detect_image(image)
+            output_folder = args.output or "batch_results"
+            print(f"📁 Processing batch images from: {args.input}")
+            detector.analyze_image_batch(args.input, output_folder)
             
-            print(f"✓ Found {len(detections)} objects")
-            for det in detections:
-                print(f"  - {det['class_name']}: {det['confidence']:.2f}")
+        elif args.mode == 'interactive':
+            print("🎮 Interactive mode - Process images interactively")
             
-            # Hiển thị kết quả
-            cv2.imshow('Detection Result - Press any key to close', annotated_image)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-            
-            # Lưu nếu có output path
-            if args.output:
-                cv2.imwrite(args.output, annotated_image)
-                print(f"✓ Result saved to: {args.output}")
+            while True:
+                print("\n" + "="*50)
+                print("INTERACTIVE TRAFFIC DETECTION")
+                print("="*50)
+                print("1. Process single image")
+                print("2. Process image folder (batch)")
+                print("3. Start camera detection")
+                print("4. Exit")
+                
+                choice = input("\nEnter choice (1-4): ").strip()
+                
+                if choice == '1':
+                    image_path = input("Enter image path: ").strip()
+                    if os.path.exists(image_path):
+                        print(f"Processing: {image_path}")
+                        annotated_image, detections = detector.detect_from_image_file(image_path)
+                        if annotated_image is not None:
+                            continue_viewing = detector.display_image_with_detections(annotated_image, detections)
+                            if not continue_viewing:
+                                break
+                    else:
+                        print(f"❌ File not found: {image_path}")
+                
+                elif choice == '2':
+                    folder_path = input("Enter folder path: ").strip()
+                    if os.path.exists(folder_path):
+                        output_folder = input("Enter output folder (default: batch_results): ").strip() or "batch_results"
+                        detector.analyze_image_batch(folder_path, output_folder)
+                    else:
+                        print(f"❌ Folder not found: {folder_path}")
+                
+                elif choice == '3':
+                    camera_id = input("Enter camera ID (default: 0): ").strip()
+                    camera_id = int(camera_id) if camera_id.isdigit() else 0
+                    print(f"Starting camera detection (Camera {camera_id})")
+                    detector.detect_realtime(camera_id)
+                
+                elif choice == '4':
+                    print("👋 Goodbye!")
+                    break
+                
+                else:
+                    print("❌ Invalid choice!")
                 
         elif args.mode == 'realtime':
             print(f"Starting realtime detection with camera {args.camera}")
@@ -155,9 +202,23 @@ def main():
         elif "model" in str(e).lower():
             print("- Check internet connection for model download")
             print("- Try different model size in config.py")
+        elif "image" in str(e).lower() or "file" in str(e).lower():
+            print("- Check if image file exists and is readable")
+            print("- Supported formats: jpg, jpeg, png, bmp, tiff, webp")
+            print("- Try with different image")
         else:
             print("- Check if all requirements are installed")
             print("- Run: python main.py --mode test")
+        
+        print("\n=== Usage Examples ===")
+        print("Image detection:")
+        print("  python main.py --mode image --input image.jpg")
+        print("Batch processing:")
+        print("  python main.py --mode batch --input ./images --output ./results")
+        print("Interactive mode:")
+        print("  python main.py --mode interactive")
+        print("Camera detection:")
+        print("  python main.py --mode realtime --camera 0")
 
 if __name__ == "__main__":
     main()

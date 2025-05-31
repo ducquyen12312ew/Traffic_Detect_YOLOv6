@@ -4,6 +4,8 @@ from ultralytics import YOLO
 from typing import List, Tuple, Dict
 import os
 import torch
+import glob
+from datetime import datetime
 from .config import Config
 from .utils import draw_bounding_box
 from .traffic_light_detector import EnhancedTrafficLightDetector
@@ -67,35 +69,105 @@ class TrafficDetector:
         else:
             return None
     
-    def get_basic_sign_classification(self, class_name: str) -> Dict:
+    def get_basic_sign_classification(self, class_name: str, roi: np.ndarray = None) -> Dict:
         """
-        Basic classification cho traffic signs mà không cần CNN
+        Enhanced basic classification cho traffic signs
         """
+        # Enhanced sign keywords với more details
         sign_keywords = {
-            'stop': {'vietnamese_name': 'Biển báo dừng', 'color': (0, 0, 255)},
-            'speed': {'vietnamese_name': 'Biển giới hạn tốc độ', 'color': (255, 0, 0)},
-            'yield': {'vietnamese_name': 'Biển nhường đường', 'color': (0, 255, 255)},
-            'no_entry': {'vietnamese_name': 'Biển cấm đi ngược chiều', 'color': (0, 0, 255)},
-            'warning': {'vietnamese_name': 'Biển cảnh báo', 'color': (0, 255, 255)},
-            'mandatory': {'vietnamese_name': 'Biển chỉ dẫn', 'color': (255, 0, 0)},
-            'information': {'vietnamese_name': 'Biển thông tin', 'color': (0, 255, 0)}
+            'stop': {'vietnamese_name': 'Biển báo dừng (STOP)', 'color': (0, 0, 255), 'confidence_boost': 0.2},
+            'speed': {'vietnamese_name': 'Biển giới hạn tốc độ', 'color': (255, 0, 0), 'confidence_boost': 0.15},
+            'yield': {'vietnamese_name': 'Biển nhường đường', 'color': (0, 255, 255), 'confidence_boost': 0.15},
+            'no_entry': {'vietnamese_name': 'Biển cấm đi ngược chiều', 'color': (0, 0, 255), 'confidence_boost': 0.15},
+            'warning': {'vietnamese_name': 'Biển cảnh báo', 'color': (0, 255, 255), 'confidence_boost': 0.1},
+            'mandatory': {'vietnamese_name': 'Biển chỉ dẫn bắt buộc', 'color': (255, 0, 0), 'confidence_boost': 0.1},
+            'information': {'vietnamese_name': 'Biển thông tin hướng dẫn', 'color': (0, 255, 0), 'confidence_boost': 0.1},
+            'pedestrian': {'vietnamese_name': 'Biển báo người đi bộ', 'color': (255, 255, 0), 'confidence_boost': 0.1},
+            'school': {'vietnamese_name': 'Khu vực trường học', 'color': (0, 255, 0), 'confidence_boost': 0.15},
+            'construction': {'vietnamese_name': 'Khu vực thi công', 'color': (0, 255, 255), 'confidence_boost': 0.1},
+            'parking': {'vietnamese_name': 'Biển báo đỗ xe', 'color': (255, 0, 255), 'confidence_boost': 0.1},
+            'turn': {'vietnamese_name': 'Biển báo rẽ', 'color': (128, 255, 0), 'confidence_boost': 0.1}
         }
         
-        # Tìm keyword trong class name
-        for keyword, info in sign_keywords.items():
-            if keyword in class_name.lower():
-                return {
-                    'vietnamese_name': info['vietnamese_name'],
-                    'color': info['color'],
-                    'confidence': 0.8
-                }
+        # Enhanced analysis nếu có ROI
+        if roi is not None and roi.size > 0:
+            # Analyze colors in ROI để improve classification
+            roi_analysis = self.analyze_sign_roi(roi)
+        else:
+            roi_analysis = {'dominant_color': 'unknown', 'shape_hint': 'unknown'}
         
-        # Default cho unknown signs
+        # Find best match
+        class_lower = class_name.lower()
+        best_match = None
+        best_score = 0
+        
+        for keyword, info in sign_keywords.items():
+            if keyword in class_lower:
+                score = len(keyword) / len(class_lower)  # Longer matches get higher score
+                if score > best_score:
+                    best_score = score
+                    best_match = info
+        
+        if best_match:
+            result = best_match.copy()
+            
+            # Enhance based on ROI analysis
+            if roi_analysis['dominant_color'] == 'red':
+                if 'cấm' not in result['vietnamese_name'].lower():
+                    result['vietnamese_name'] = f"Biển cấm - {result['vietnamese_name']}"
+                result['confidence_boost'] += 0.05
+            elif roi_analysis['dominant_color'] == 'yellow':
+                if 'cảnh báo' not in result['vietnamese_name'].lower():
+                    result['vietnamese_name'] = f"Biển cảnh báo - {result['vietnamese_name']}"
+                result['confidence_boost'] += 0.05
+            
+            return result
+        
+        # Default classification
         return {
             'vietnamese_name': 'Biển báo giao thông',
             'color': (128, 128, 128),
-            'confidence': 0.5
+            'confidence_boost': 0.0
         }
+    
+    def analyze_sign_roi(self, roi: np.ndarray) -> Dict:
+        """
+        Analyze sign ROI để get color và shape hints
+        """
+        try:
+            # Convert to HSV
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            
+            # Color analysis
+            color_ranges = {
+                'red': [(np.array([0, 100, 100]), np.array([10, 255, 255])),
+                       (np.array([170, 100, 100]), np.array([180, 255, 255]))],
+                'yellow': [(np.array([20, 100, 100]), np.array([30, 255, 255]))],
+                'blue': [(np.array([100, 100, 100]), np.array([130, 255, 255]))],
+                'green': [(np.array([40, 100, 100]), np.array([80, 255, 255]))],
+                'white': [(np.array([0, 0, 200]), np.array([180, 30, 255]))]
+            }
+            
+            color_scores = {}
+            total_pixels = roi.shape[0] * roi.shape[1]
+            
+            for color_name, ranges in color_ranges.items():
+                total_area = 0
+                for lower, upper in ranges:
+                    mask = cv2.inRange(hsv, lower, upper)
+                    total_area += cv2.countNonZero(mask)
+                color_scores[color_name] = total_area / total_pixels
+            
+            dominant_color = max(color_scores, key=color_scores.get) if color_scores else 'unknown'
+            
+            return {
+                'dominant_color': dominant_color,
+                'color_percentages': color_scores,
+                'shape_hint': 'unknown'  # Could add shape analysis here
+            }
+            
+        except Exception as e:
+            return {'dominant_color': 'unknown', 'shape_hint': 'unknown'}
         
     def detect_image(self, image: np.ndarray) -> Tuple[np.ndarray, List[Dict]]:
         """
@@ -190,10 +262,13 @@ class TrafficDetector:
             is_traffic_sign = any(keyword in class_name for keyword in sign_keywords)
             
             if is_traffic_sign and 'traffic_light' not in class_name:
-                # Basic classification
-                sign_info = self.get_basic_sign_classification(class_name)
+                # Enhanced sign classification với ROI analysis
+                roi = image[x1:y2, x1:x2] if x2 > x1 and y2 > y1 else None
+                sign_info = self.get_basic_sign_classification(class_name, roi)
                 detection['basic_vietnamese_name'] = sign_info['vietnamese_name']
                 detection['sign_color'] = sign_info['color']
+                detection['confidence'] += sign_info.get('confidence_boost', 0)
+                detection['enhanced_sign'] = True
             
             final_detections.append(detection)
         
@@ -406,20 +481,218 @@ class TrafficDetector:
             cv2.destroyAllWindows()
             print("Camera released and windows closed")
     
-    def test_camera(self, camera_id: int = 0):
-        """Test camera connection"""
-        cap = cv2.VideoCapture(camera_id)
-        if cap.isOpened():
-            ret, frame = cap.read()
-            if ret:
-                print(f"Camera {camera_id} is working properly")
-                print(f"Frame shape: {frame.shape}")
-                cap.release()
-                return True
+    def detect_from_image_file(self, image_path: str, output_path: str = None) -> Tuple[np.ndarray, List[Dict]]:
+        """
+        Detect từ image file - IMAGE IMPORT FUNCTIONALITY
+        """
+        if not os.path.exists(image_path):
+            print(f"❌ Image file not found: {image_path}")
+            return None, []
+        
+        try:
+            # Load image
+            image = cv2.imread(image_path)
+            if image is None:
+                print(f"❌ Cannot load image: {image_path}")
+                return None, []
+            
+            print(f"📸 Processing image: {os.path.basename(image_path)}")
+            print(f"📐 Image size: {image.shape[1]}x{image.shape[0]}")
+            
+            # Detect objects
+            annotated_image, detections = self.detect_image(image)
+            
+            # Print results
+            if detections:
+                print(f"✅ Found {len(detections)} objects:")
+                
+                # Group detections by type
+                traffic_lights = [d for d in detections if 'traffic_light_color' in d]
+                signs = [d for d in detections if 'basic_vietnamese_name' in d]
+                vehicles = [d for d in detections if d['class_name'] in ['car', 'truck', 'bus', 'motorcycle', 'bicycle']]
+                people = [d for d in detections if d['class_name'] == 'person']
+                
+                if traffic_lights:
+                    print(f"  🚦 Traffic lights: {len(traffic_lights)}")
+                    for light in traffic_lights:
+                        color = light['traffic_light_color']
+                        conf = light['confidence']
+                        print(f"    - Đèn {color.upper()}: {conf:.2f}")
+                
+                if signs:
+                    print(f"  🚧 Traffic signs: {len(signs)}")
+                    for sign in signs:
+                        name = sign['basic_vietnamese_name']
+                        conf = sign['confidence']
+                        print(f"    - {name}: {conf:.2f}")
+                
+                if vehicles:
+                    print(f"  🚗 Vehicles: {len(vehicles)}")
+                    vehicle_count = {}
+                    for vehicle in vehicles:
+                        vtype = vehicle['class_name']
+                        vehicle_count[vtype] = vehicle_count.get(vtype, 0) + 1
+                    for vtype, count in vehicle_count.items():
+                        print(f"    - {vtype}: {count}")
+                
+                if people:
+                    print(f"  🚶 People: {len(people)}")
             else:
-                print(f"Camera {camera_id} opened but cannot read frames")
-                cap.release()
-                return False
-        else:
-            print(f"Cannot open camera {camera_id}")
-            return False
+                print("❌ No objects detected")
+            
+            # Save result if output path provided
+            if output_path:
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                cv2.imwrite(output_path, annotated_image)
+                print(f"💾 Result saved: {output_path}")
+            
+            return annotated_image, detections
+            
+        except Exception as e:
+            print(f"❌ Error processing image: {e}")
+            return None, []
+    
+    def analyze_image_batch(self, folder_path: str, output_folder: str = "results"):
+        """
+        Analyze multiple images from folder - BATCH PROCESSING
+        """
+        if not os.path.exists(folder_path):
+            print(f"❌ Folder not found: {folder_path}")
+            return
+        
+        # Create output folder
+        os.makedirs(output_folder, exist_ok=True)
+        
+        # Find image files
+        image_extensions = ['.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp']
+        image_files = []
+        
+        for ext in image_extensions:
+            pattern = os.path.join(folder_path, f"*{ext}")
+            image_files.extend(glob.glob(pattern))
+            image_files.extend(glob.glob(pattern.upper()))
+        
+        if not image_files:
+            print(f"❌ No image files found in: {folder_path}")
+            print(f"Supported formats: {', '.join(image_extensions)}")
+            return
+        
+        print(f"📁 Found {len(image_files)} images to process")
+        print(f"📂 Output folder: {output_folder}")
+        
+        # Process images
+        results_summary = []
+        successful = 0
+        
+        for i, image_path in enumerate(image_files):
+            print(f"\n📸 Processing {i+1}/{len(image_files)}: {os.path.basename(image_path)}")
+            
+            # Generate output path
+            output_name = f"result_{os.path.basename(image_path)}"
+            output_path = os.path.join(output_folder, output_name)
+            
+            # Process image
+            annotated_image, detections = self.detect_from_image_file(image_path, output_path)
+            
+            if annotated_image is not None:
+                successful += 1
+                
+                # Create summary
+                summary = {
+                    'filename': os.path.basename(image_path),
+                    'total_objects': len(detections),
+                    'traffic_lights': len([d for d in detections if 'traffic_light_color' in d]),
+                    'signs': len([d for d in detections if 'basic_vietnamese_name' in d]),
+                    'vehicles': len([d for d in detections if d['class_name'] in ['car', 'truck', 'bus', 'motorcycle']]),
+                    'people': len([d for d in detections if d['class_name'] == 'person'])
+                }
+                results_summary.append(summary)
+        
+        # Save summary report
+        self.save_batch_report(results_summary, output_folder)
+        
+        print(f"\n✅ Batch processing completed!")
+        print(f"📊 Successfully processed: {successful}/{len(image_files)} images")
+        print(f"📁 Results saved in: {output_folder}")
+    
+    def save_batch_report(self, results: List[Dict], output_folder: str):
+        """Save batch processing report"""
+        report_path = os.path.join(output_folder, "detection_report.txt")
+        
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write("VIETNAM TRAFFIC DETECTION REPORT\n")
+            f.write("=" * 50 + "\n\n")
+            
+            # Summary statistics
+            total_files = len(results)
+            total_objects = sum(r['total_objects'] for r in results)
+            total_lights = sum(r['traffic_lights'] for r in results)
+            total_signs = sum(r['signs'] for r in results)
+            total_vehicles = sum(r['vehicles'] for r in results)
+            total_people = sum(r['people'] for r in results)
+            
+            f.write(f"SUMMARY:\n")
+            f.write(f"  Files processed: {total_files}\n")
+            f.write(f"  Total objects: {total_objects}\n")
+            f.write(f"  Traffic lights: {total_lights}\n")
+            f.write(f"  Traffic signs: {total_signs}\n")
+            f.write(f"  Vehicles: {total_vehicles}\n")
+            f.write(f"  People: {total_people}\n\n")
+            
+            f.write(f"DETAILED RESULTS:\n")
+            f.write(f"{'-'*50}\n")
+            
+            for result in results:
+                f.write(f"\nFile: {result['filename']}\n")
+                f.write(f"  Total objects: {result['total_objects']}\n")
+                f.write(f"  Traffic lights: {result['traffic_lights']}\n")
+                f.write(f"  Traffic signs: {result['signs']}\n")
+                f.write(f"  Vehicles: {result['vehicles']}\n")
+                f.write(f"  People: {result['people']}\n")
+        
+        print(f"📄 Report saved: {report_path}")
+    
+    def display_image_with_detections(self, image: np.ndarray, detections: List[Dict], 
+                                    window_name: str = "Traffic Detection Results"):
+        """
+        Display image với detections - INTERACTIVE VIEWING
+        """
+        if image is None:
+            print("❌ No image to display")
+            return
+        
+        # Resize for display if too large
+        display_image = image.copy()
+        height, width = display_image.shape[:2]
+        
+        # Scale down if image is too large
+        max_size = 1200
+        if max(height, width) > max_size:
+            scale = max_size / max(height, width)
+            new_width = int(width * scale)
+            new_height = int(height * scale)
+            display_image = cv2.resize(display_image, (new_width, new_height))
+        
+        # Add detection count to title
+        total_objects = len(detections)
+        traffic_lights = len([d for d in detections if 'traffic_light_color' in d])
+        signs = len([d for d in detections if 'basic_vietnamese_name' in d])
+        
+        title = f"{window_name} - {total_objects} objects ({traffic_lights} lights, {signs} signs)"
+        
+        # Display image
+        cv2.imshow(title, display_image)
+        
+        print(f"\n📺 Displaying results...")
+        print(f"Press any key to close, 's' to save, ESC to exit")
+        
+        key = cv2.waitKey(0) & 0xFF
+        
+        if key == ord('s'):
+            # Save image
+            output_path = f"detection_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+            cv2.imwrite(output_path, display_image)
+            print(f"💾 Image saved: {output_path}")
+        
+        cv2.destroyAllWindows()
+        return key != 27  # Return False if ESC pressed
