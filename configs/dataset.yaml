@@ -1,0 +1,38 @@
+# Dataset configuration for Vietnamese traffic detection
+path: ./data  # dataset root dir
+train: images/train  # train images relative to 'path'
+val: images/val  # val images relative to 'path'
+test: images/test  # test images (optional)
+
+# Classes - Dựa trên biển báo Việt Nam và thêm xe cộ, đèn giao thông
+names:
+  0: car                    # Xe hơi
+  1: truck                  # Xe tải
+  2: bus                    # Xe buýt  
+  3: motorcycle             # Xe máy
+  4: bicycle                # Xe đạp
+  5: person                 # Người đi bộ
+  6: traffic_light_red      # Đèn đỏ
+  7: traffic_light_yellow   # Đèn vàng
+  8: traffic_light_green    # Đèn xanh
+  9: stop_sign              # Biển báo dừng (102)
+  10: no_entry              # Biển cấm đi ngược chiều (103a)
+  11: no_cars               # Biển cấm ô tô (103b)
+  12: no_turn_left          # Biển cấm rẽ trái (103c)
+  13: no_motorcycles        # Biển cấm xe máy (104)
+  14: no_trucks             # Biển cấm xe tải (106a)
+  15: weight_limit          # Biển giới hạn trọng tải (106b)
+  16: no_pedestrians        # Biển cấm người đi bộ (112)
+  17: height_limit          # Biển giới hạn chiều cao (117)
+  18: speed_limit_40        # Biển giới hạn tốc độ 40 (127_40)
+  19: speed_limit_50        # Biển giới hạn tốc độ 50 (127_50)
+  20: speed_limit_60        # Biển giới hạn tốc độ 60 (127_60)
+  21: warning_intersection  # Biển báo ngã tư (201)
+  22: warning_narrow_road   # Biển báo đường hẹp (203)
+  23: warning_intersection_cross # Biển báo giao lộ (205)
+  24: yield_sign            # Biển nhường đường (208)
+  25: mandatory_straight    # Biển bắt buộc đi thẳng (301)
+  26: mandatory_roundabout  # Biển bắt buộc vòng xuyến (303)
+  27: priority_road         # Biển đường ưu tiên (401)
+
+nc: 28  # number of classes
