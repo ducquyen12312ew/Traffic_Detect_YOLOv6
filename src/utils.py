@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from typing import List, Tuple
+from typing import List, Tuple, Dict  # Added Dict import
 import os
 
 def create_directories():
@@ -27,27 +27,92 @@ def draw_bounding_box(image: np.ndarray,
                      class_name: str,
                      confidence: float,
                      color: Tuple[int, int, int] = (0, 255, 0)) -> np.ndarray:
-    """Vẽ bounding box lên ảnh"""
+    """Vẽ bounding box lên ảnh với Vietnamese text support"""
     x1, y1, x2, y2 = bbox
     
-    # Vẽ rectangle
-    cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
+    # Vẽ rectangle với border dày hơn
+    cv2.rectangle(image, (x1, y1), (x2, y2), color, 3)
     
-    # Vẽ label
-    label = f"{class_name}: {confidence:.2f}"
-    label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)[0]
+    # Format label - Vietnamese friendly
+    if confidence < 1.0:
+        label = f"{class_name}: {confidence:.2f}"
+    else:
+        label = f"{class_name}: 1.00"
     
-    # Background cho text
+    # Calculate label size với font size lớn hơn
+    font_scale = 0.7
+    font_thickness = 2
+    label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)[0]
+    
+    # Ensure label không bị cắt
+    label_y = y1 - 10 if y1 - 10 > label_size[1] else y1 + label_size[1] + 10
+    
+    # Background cho text với padding
+    padding = 5
     cv2.rectangle(image, 
-                 (x1, y1 - label_size[1] - 10),
-                 (x1 + label_size[0], y1),
+                 (x1, label_y - label_size[1] - padding),
+                 (x1 + label_size[0] + padding, label_y + padding),
                  color, -1)
     
-    # Text
+    # Border cho text background
+    cv2.rectangle(image, 
+                 (x1, label_y - label_size[1] - padding),
+                 (x1 + label_size[0] + padding, label_y + padding),
+                 (255, 255, 255), 1)
+    
+    # Text màu trắng với font dày
     cv2.putText(image, label,
-               (x1, y1 - 5),
+               (x1 + 2, label_y - 2),
                cv2.FONT_HERSHEY_SIMPLEX,
-               0.6, (255, 255, 255), 2)
+               font_scale, (255, 255, 255), font_thickness)
+    
+    return image
+
+def draw_traffic_light_info(image: np.ndarray, traffic_status: Dict[str, int], 
+                          position: Tuple[int, int] = (10, 30)) -> np.ndarray:
+    """
+    Vẽ thông tin traffic light status lên ảnh
+    """
+    x, y = position
+    
+    # Background cho info panel
+    panel_width = 250
+    panel_height = len([k for k, v in traffic_status.items() if v > 0]) * 30 + 20
+    
+    if panel_height > 20:  # Chỉ vẽ nếu có traffic lights
+        cv2.rectangle(image, (x-5, y-15), (x + panel_width, y + panel_height), 
+                     (0, 0, 0), -1)  # Black background
+        cv2.rectangle(image, (x-5, y-15), (x + panel_width, y + panel_height), 
+                     (255, 255, 255), 2)  # White border
+        
+        # Traffic light status
+        offset = 0
+        for color, count in traffic_status.items():
+            if count > 0:
+                # Vietnamese names
+                vietnamese_names = {
+                    'red': 'Đèn Đỏ',
+                    'yellow': 'Đèn Vàng', 
+                    'green': 'Đèn Xanh',
+                    'unknown': 'Đèn Không Rõ'
+                }
+                
+                display_name = vietnamese_names.get(color, color)
+                text = f"{display_name}: {count}"
+                
+                # Color coding
+                if color == 'red':
+                    text_color = (0, 0, 255)
+                elif color == 'yellow':
+                    text_color = (0, 255, 255)
+                elif color == 'green':
+                    text_color = (0, 255, 0)
+                else:
+                    text_color = (255, 255, 255)
+                
+                cv2.putText(image, text, (x, y + offset), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, text_color, 2)
+                offset += 25
     
     return image
 

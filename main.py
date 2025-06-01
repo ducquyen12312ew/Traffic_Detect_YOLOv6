@@ -96,8 +96,41 @@ def main():
                 return
                 
             print(f"Processing video: {args.input}")
-            output_path = detector.detect_video(args.input, args.output)
-            print(f"✓ Video processing completed: {output_path}")
+            
+            try:
+                output_path = detector.detect_video(args.input, args.output)
+                
+                if output_path and os.path.exists(output_path):
+                    print(f"✓ Video processing completed: {output_path}")
+                    
+                    # Show results info
+                    if output_path.endswith('.html'):
+                        print("📄 HTML viewer created - open in browser to view results")
+                        print("💡 Use arrow keys to navigate, spacebar to play/pause")
+                    elif output_path.endswith('_frames'):
+                        print("📁 Frame sequence created - check the folder for processed images")
+                        viewer_html = os.path.join(output_path, "viewer.html")
+                        if os.path.exists(viewer_html):
+                            print(f"📄 HTML viewer available: {viewer_html}")
+                    else:
+                        print("🎬 Video file created successfully")
+                        
+                        # Try to get file info
+                        try:
+                            file_size = os.path.getsize(output_path) / (1024 * 1024)
+                            print(f"📂 File size: {file_size:.2f} MB")
+                        except:
+                            pass
+                else:
+                    print("❌ Video processing failed")
+                    
+            except Exception as e:
+                print(f"❌ Video processing error: {e}")
+                print("\n💡 Troubleshooting:")
+                print("1. Check if input video file is valid")
+                print("2. Try with a shorter video first")
+                print("3. Install K-Lite Codec Pack for better codec support")
+                print("4. Use --mode image to test detection on single frames")
             
         elif args.mode == 'image':
             if not args.input:
@@ -206,6 +239,10 @@ def main():
             print("- Check if image file exists and is readable")
             print("- Supported formats: jpg, jpeg, png, bmp, tiff, webp")
             print("- Try with different image")
+        elif "codec" in str(e).lower() or "fourcc" in str(e).lower():
+            print("- Video codec issue detected")
+            print("- Try different output format (e.g., .avi instead of .mp4)")
+            print("- Install additional video codecs")
         else:
             print("- Check if all requirements are installed")
             print("- Run: python main.py --mode test")
@@ -219,6 +256,8 @@ def main():
         print("  python main.py --mode interactive")
         print("Camera detection:")
         print("  python main.py --mode realtime --camera 0")
+        print("Video detection:")
+        print("  python main.py --mode video --input video.mp4 --output result.mp4")
 
 if __name__ == "__main__":
     main()
